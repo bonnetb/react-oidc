@@ -1,9 +1,12 @@
 import {
     AuthorizationNotifier,
     AuthorizationRequest,
+    AuthorizationResponse,
     AuthorizationServiceConfiguration,
     BaseTokenRequestHandler,
     DefaultCrypto,
+    EndSessionRequest,
+    EndSessionResponse,
     FetchRequestor,
     GRANT_TYPE_AUTHORIZATION_CODE,
     GRANT_TYPE_REFRESH_TOKEN,
@@ -49,7 +52,8 @@ const extractAccessTokenPayload = tokens => {
     authority: string,
     refresh_time_before_tokens_expiration_in_second?: number,
     service_worker_relative_url?:string,
-     service_worker_only?:boolean,
+    service_worker_only?:boolean,
+    post_logout_redirect_uri?: string,
 };
 
 const oidcDatabase = {};
@@ -345,16 +349,16 @@ export class Oidc {
                     }
     
                     let extras = null;
-                    if (request && request.internal) {
+                    if (request && request instanceof AuthorizationRequest && request.internal) {
                         extras = {};
                         extras.code_verifier = request.internal.code_verifier;
                     }
-    
+                    
                     const tokenRequest = new TokenRequest({
                         client_id: clientId,
                         redirect_uri: redirectURL,
                         grant_type: GRANT_TYPE_AUTHORIZATION_CODE,
-                        code: response.code,
+                        code: (response instanceof AuthorizationResponse?response.code:""),
                         refresh_token: undefined,
                         extras,
                     });
@@ -433,9 +437,18 @@ export class Oidc {
      
     async logoutAsync() {
         const oidcServerConfiguration = await this.initAsync(this.configuration.authority);
-        // TODO implement real logout
-        await this.destroyAsync();  
-        window.location.href = oidcServerConfiguration.endSessionEndpoint;
+        // uses a redirect flow
+        const authorizationHandler = new RedirectRequestHandler();
+        // create a request
+        const tokensObject: any = this.tokens;
+        const req = new EndSessionRequest({
+            id_token_hint: tokensObject.idToken,
+            post_logout_redirect_uri: this.configuration.post_logout_redirect_uri,
+            state: undefined,
+        })
+        // make the end Session request
+        authorizationHandler.performEndSessionRequest(oidcServerConfiguration, req);
+        await this.destroyAsync(); 
     }
   }
   
